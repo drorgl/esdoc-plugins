@@ -15,7 +15,7 @@ class Plugin {
   onHandleConfig(ev) {
     if (!this._enable) return;
 
-    if (!ev.data.config.includes)  ev.data.config.includes = [];
+    if (!ev.data.config.includes) ev.data.config.includes = [];
     ev.data.config.includes.push('\\.ts$', '\\.js$');
   }
 
@@ -28,10 +28,10 @@ class Plugin {
 
     // ev.data.parser = this._tsParser.bind(this, esParser, esParserOption, filePath);
 
-    ev.data.parser = (code) =>{
+    ev.data.parser = (code) => {
       try {
         return this._tsParser(esParser, esParserOption, filePath, code);
-      } catch(e) {
+      } catch (e) {
         console.log(e)
       }
     };
@@ -47,20 +47,29 @@ class Plugin {
     const nodes = this._getTargetTSNodes(sourceFile);
 
     // rewrite jsdoc comment
-    nodes.sort((a,b) => b.pos - a.pos); // hack: transpile comment with reverse
+    nodes.sort((a, b) => b.pos - a.pos); // hack: transpile comment with reverse
     const codeChars = [...code];
     for (const node of nodes) {
-      const jsDocNode = this._getJSDocNode( node);
-      if (jsDocNode && jsDocNode.comment) codeChars.splice(jsDocNode.pos, jsDocNode.end - jsDocNode.pos);
-
-      const newComment = this._transpileComment(node, jsDocNode ? jsDocNode.comment : '', code);
-      codeChars.splice(node.pos, 0, newComment);
+      const jsDocNodes = this._getJSDocNode(node);
+      for (const jsDocNode of jsDocNodes) {
+        var oldComment = "";
+        if (jsDocNode && jsDocNode.comment) {
+          oldComment= codeChars.splice(jsDocNode.pos, jsDocNode.end - jsDocNode.pos).join('');
+          if (oldComment.substring(0,2) == "/*"){
+            oldComment = oldComment.substring(2);
+          }
+          if (oldComment.substring(oldComment.length - 2) == "*/"){
+            oldComment = oldComment.substring(0,oldComment.length - 2);
+          }
+        }
+        const newComment = this._transpileComment(node, oldComment, code);
+        codeChars.splice(node.pos, 0, newComment);
+      }
     }
     const newTSCode = codeChars.join('');
 
     // transpile typescript to es
     const esCode = this._transpileTS2ES(newTSCode);
-
     return esParser(esCode);
   }
 
@@ -72,6 +81,9 @@ class Plugin {
     function walk(node) {
       switch (node.kind) {
         case ts.SyntaxKind.ClassDeclaration:
+        case ts.SyntaxKind.InterfaceDeclaration:
+        case ts.SyntaxKind.TypeAliasDeclaration:
+        case ts.SyntaxKind.EnumDeclaration:
         case ts.SyntaxKind.MethodDeclaration:
         case ts.SyntaxKind.PropertyDeclaration:
         case ts.SyntaxKind.GetAccessor:
@@ -86,20 +98,26 @@ class Plugin {
   }
 
   _getJSDocNode(node) {
-    if (!node.jsDoc) return null;
-
-    return node.jsDoc[node.jsDoc.length - 1];
+    if (!node.jsDoc) return [null];
+    return node.jsDoc;
   }
 
   _transpileComment(node, comment, code) {
-    const esNode = {type: 'CommentBlock', value: `*\n${comment}`};
+    const esNode = { type: 'CommentBlock', value: `*\n${comment}` };
     const tags = CommentParser.parse(esNode);
 
     this._applyLOC(node, tags, code);
 
-    switch(node.kind) {
+    switch (node.kind) {
       case ts.SyntaxKind.ClassDeclaration:
         // do nothing
+        break;
+      case ts.SyntaxKind.InterfaceDeclaration:
+        // do nothing
+        break;
+      case ts.SyntaxKind.TypeAliasDeclaration:
+        break;
+      case ts.SyntaxKind.EnumDeclaration:
         break;
       case ts.SyntaxKind.MethodDeclaration:
         this._applyCallableParam(node, tags);
@@ -129,7 +147,7 @@ class Plugin {
     for (let i = 0; i < node.name.end; i++) {
       if (codeChars[i] === '\n') loc++;
     }
-    tags.push({tagName: '@lineNumber', tagValue: `${loc}`});
+    tags.push({ tagName: '@lineNumber', tagValue: `${loc}` });
   }
 
   _applyCallableParam(node, tags) {
@@ -145,7 +163,7 @@ class Plugin {
     // merge
     // case: params without comments
     if (paramTags.length === 0 && types.length) {
-      const tmp = types.map(({type, name}) => {
+      const tmp = types.map(({ type, name }) => {
         return {
           tagName: '@param',
           tagValue: `{${type}} ${name}`
@@ -185,7 +203,7 @@ class Plugin {
     if (returnTag && returnTag.tagValue.charAt(0) !== '{') { // return with comment but does not have type
       returnTag.tagValue = `{${type}} ${returnTag.tagValue}`;
     } else {
-      tags.push({tagName: '@return', tagValue: `{${type}}`});
+      tags.push({ tagName: '@return', tagValue: `{${type}}` });
     }
   }
 
@@ -202,7 +220,7 @@ class Plugin {
     if (typeComment && typeComment.tagValue.charAt(0) !== '{') { // type with comment but does not have tpe
       typeComment.tagValue = `{${type}}`;
     } else {
-      tags.push({tagName: '@type', tagValue: `{${type}}`});
+      tags.push({ tagName: '@type', tagValue: `{${type}}` });
     }
   }
 
@@ -219,7 +237,7 @@ class Plugin {
 
     // merge
     // case: param without comment
-    tags.push({tagName: '@type', tagValue: `{${type}}`});
+    tags.push({ tagName: '@type', tagValue: `{${type}}` });
   }
 
   _applyClassProperty(node, tags) {
@@ -235,16 +253,21 @@ class Plugin {
     if (typeComment && typeComment.tagValue.charAt(0) !== '{') { // type with comment but does not have tpe
       typeComment.tagValue = `{${type}}`;
     } else {
-      tags.push({tagName: '@type', tagValue: `{${type}}`});
+      tags.push({ tagName: '@type', tagValue: `{${type}}` });
     }
   }
 
   _getTypeFromAnnotation(typeNode) {
-    switch(typeNode.kind) {
+    switch (typeNode.kind) {
       case ts.SyntaxKind.NumberKeyword: return 'number';
       case ts.SyntaxKind.StringKeyword: return 'string';
       case ts.SyntaxKind.BooleanKeyword: return 'boolean';
-      case ts.SyntaxKind.TypeReference: return typeNode.typeName.text;
+      case ts.SyntaxKind.ObjectKeyword: return 'object';
+      case ts.SyntaxKind.EnumKeyword: return 'enum';
+      case ts.SyntaxKind.UnionType: return typeNode.types.map(t => this._getTypeFromAnnotation(t)).join("|");
+      case ts.SyntaxKind.TypeReference: return typeNode.typeName.text || typeNode.typeName.escapedText;
+      default:
+        console.log("warning: node kind not handled", typeNode.kind);
     }
   }
 
@@ -262,7 +285,7 @@ class Plugin {
       jsx: esOption.jsx ? 'preserve' : undefined,
     };
 
-    const result = ts.transpileModule(tsCode, {compilerOptions: options});
+    const result = ts.transpileModule(tsCode, { compilerOptions: options });
     return result.outputText;
   }
 }

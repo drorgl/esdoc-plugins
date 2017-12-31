@@ -30,6 +30,16 @@ describe('test/TypeScript.js:', ()=> {
     assert.deepEqual(doc.return.types, ['string']);
   });
 
+
+  it('has type of method, without type', ()=>{
+    const doc = find('longname', 'src/TypeScript.ts~TestTypeScriptClass#method4');
+    assert.equal(doc.params.length, 3);
+    assert.deepEqual(doc.params[0].types, ['number']);
+    assert.deepEqual(doc.params[1].types, ['Foo', 'Bar']);
+    assert.deepEqual(doc.params[2].types, ['Bar']);
+    assert.deepEqual(doc.return.types, ['string','Bar']);
+  });
+
   it('has type of getter, without comment', ()=>{
     const doc = find('longname', 'src/TypeScript.ts~TestTypeScriptClass#getter1');
     assert.deepEqual(doc.type.types, ['string']);
